@@ -27,6 +27,6 @@ def transcribe_file(
     result = mlx_whisper.transcribe(file_path, **kwargs)
 
     gc.collect()
-    mx.metal.clear_cache()
+    mx.clear_cache()
 
     return result
