@@ -12,6 +12,7 @@ from .config import DEFAULT_MODEL, DEFAULT_FORMAT
 from .scanner import scan_directory, compute_output_path
 from .tracker import Tracker
 from .transcriber import transcribe_file
+from .vocabulary import load_vocabulary, build_initial_prompt, apply_replacements
 
 app = typer.Typer(help="Batch transcribe audio/video files using mlx-whisper.")
 console = Console()
@@ -39,6 +40,16 @@ def write_output(result: dict, output_path: Path, fmt: str) -> None:
         json_path.write_text(json.dumps(output, indent=2, ensure_ascii=False) + "\n")
 
 
+def apply_vocab_replacements(result: dict, vocab: dict | None) -> dict:
+    """Apply vocabulary replacements to transcription result text and segments."""
+    if not vocab:
+        return result
+    result["text"] = apply_replacements(result["text"], vocab)
+    for segment in result.get("segments", []):
+        segment["text"] = apply_replacements(segment["text"], vocab)
+    return result
+
+
 @app.command()
 def run(
     input_dir: Path = typer.Argument(..., help="Directory containing audio/video files"),
@@ -47,6 +58,7 @@ def run(
     format: str = typer.Option(DEFAULT_FORMAT, "--format", help="Output format: txt, json, or both"),
     language: str = typer.Option(None, help="Language code (e.g. 'en'). Default: auto-detect"),
     overwrite: bool = typer.Option(False, help="Re-transcribe completed files"),
+    vocab: Path = typer.Option(None, "--vocab", help="Path to vocabulary JSON file (default: auto-discover from output_dir)"),
 ):
     """Batch transcribe all audio/video files in a directory."""
     input_dir = input_dir.resolve()
@@ -57,6 +69,9 @@ def run(
         raise typer.Exit(1)
 
     output_dir.mkdir(parents=True, exist_ok=True)
+
+    vocabulary = load_vocabulary(vocab_path=vocab, output_dir=output_dir)
+    initial_prompt = build_initial_prompt(vocabulary)
 
     files = scan_directory(input_dir)
     if not files:
@@ -101,9 +116,10 @@ def run(
 
             try:
                 start = time.time()
-                result = transcribe_file(str(f), model=model, language=language)
+                result = transcribe_file(str(f), model=model, language=language, initial_prompt=initial_prompt)
                 elapsed = time.time() - start
 
+                apply_vocab_replacements(result, vocabulary)
                 write_output(result, out_path, format)
 
                 duration = result.get("duration") or result.get("segments", [{}])[-1].get("end")
@@ -125,6 +141,7 @@ def single(
     output: Path = typer.Option(None, help="Output file path (default: stdout)"),
     format: str = typer.Option(DEFAULT_FORMAT, "--format", help="Output format: txt or json"),
     language: str = typer.Option(None, help="Language code (e.g. 'en'). Default: auto-detect"),
+    vocab: Path = typer.Option(None, "--vocab", help="Path to vocabulary JSON file"),
 ):
     """Transcribe a single file for quick testing."""
     file_path = file_path.resolve()
@@ -132,12 +149,16 @@ def single(
         console.print(f"[red]File not found: {file_path}[/red]")
         raise typer.Exit(1)
 
+    vocabulary = load_vocabulary(vocab_path=vocab)
+    initial_prompt = build_initial_prompt(vocabulary)
+
     err_console.print(f"Transcribing [bold]{file_path.name}[/bold] with model [bold]{model}[/bold]...")
 
     start = time.time()
-    result = transcribe_file(str(file_path), model=model, language=language)
+    result = transcribe_file(str(file_path), model=model, language=language, initial_prompt=initial_prompt)
     elapsed = time.time() - start
 
+    apply_vocab_replacements(result, vocabulary)
     duration = result.get("duration")
 
     if output:
@@ -210,9 +231,14 @@ def status(
 def retry(
     output_dir: Path = typer.Argument(..., help="Output directory with tracker DB"),
     model: str = typer.Option(None, help="Model to use (default: same as original run)"),
+    vocab: Path = typer.Option(None, "--vocab", help="Path to vocabulary JSON file (default: auto-discover from output_dir)"),
 ):
     """Retry all failed files."""
     output_dir = output_dir.resolve()
+
+    vocabulary = load_vocabulary(vocab_path=vocab, output_dir=output_dir)
+    initial_prompt = build_initial_prompt(vocabulary)
+
     tracker = Tracker(output_dir)
 
     count = tracker.reset_failed()
@@ -243,9 +269,10 @@ def retry(
 
             try:
                 start = time.time()
-                result = transcribe_file(input_path, model=file_model)
+                result = transcribe_file(input_path, model=file_model, initial_prompt=initial_prompt)
                 elapsed = time.time() - start
 
+                apply_vocab_replacements(result, vocabulary)
                 write_output(result, out_path, out_path.suffix.lstrip(".") or "txt")
 
                 duration = result.get("duration") or result.get("segments", [{}])[-1].get("end")
