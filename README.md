@@ -40,7 +40,8 @@ uv run transcribe run <input_dir> <output_dir> \
   --model mlx-community/whisper-large-v3-turbo \
   --format txt|json|both \
   --language en \
-  --overwrite
+  --overwrite \
+  --path <subdir>    # only process a subdirectory (e.g. --path 2015)
 ```
 
 ## Model & Weights
