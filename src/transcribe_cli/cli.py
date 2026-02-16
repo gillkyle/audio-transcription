@@ -59,13 +59,16 @@ def run(
     language: str = typer.Option(None, help="Language code (e.g. 'en'). Default: auto-detect"),
     overwrite: bool = typer.Option(False, help="Re-transcribe completed files"),
     vocab: Path = typer.Option(None, "--vocab", help="Path to vocabulary JSON file (default: auto-discover from output_dir)"),
+    path: str = typer.Option(None, "--path", help="Subdirectory within input_dir to process (e.g. '2015')"),
 ):
     """Batch transcribe all audio/video files in a directory."""
     input_dir = input_dir.resolve()
     output_dir = output_dir.resolve()
 
-    if not input_dir.is_dir():
-        console.print(f"[red]Input directory not found: {input_dir}[/red]")
+    scan_dir = input_dir / path if path else input_dir
+
+    if not scan_dir.is_dir():
+        console.print(f"[red]Directory not found: {scan_dir}[/red]")
         raise typer.Exit(1)
 
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -73,7 +76,7 @@ def run(
     vocabulary = load_vocabulary(vocab_path=vocab, output_dir=output_dir)
     initial_prompt = build_initial_prompt(vocabulary)
 
-    files = scan_directory(input_dir)
+    files = scan_directory(scan_dir)
     if not files:
         console.print("[yellow]No supported audio/video files found.[/yellow]")
         raise typer.Exit(0)
